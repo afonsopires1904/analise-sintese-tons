@@ -6,6 +6,10 @@
 
 
 % ---------------------------------------------------------
+
+pkg load signal; % Carrega o pacote de processamento de sinal
+
+
 % Carregar o ficheiro de áudio
 
 % Define o caminho para a pasta de áudio
@@ -31,6 +35,7 @@ ylim([-1, 1]);
 
 figure_name = [figures_dir 'Escala_Completa.png'];
 print(figure_name, '-dpng', '-r150');
+close;
 
 % ---------------------------------------------------------
 % Separação das notas individuais
@@ -78,51 +83,68 @@ for i = 1:length(notes)
     audiowrite(filename, segment, fs, 'BitsPerSample', 24);
 
 end
-
 % ---------------------------------------------------------
-% Análise FFT de cada nota
+% Analise FFT de cada nota
 
-n_parciais = 30; % Número de parciais a identificar por nota
+n_parciais = 30;
 
-peaks_mag = zeros(n_parciais, length(notes)); % Matriz para armazenar magnitudes dos picos
-peaks_freq = zeros(n_parciais, length(notes)); % Matriz para armazenar frequências dos picos
+peaks_mag  = zeros(n_parciais, length(notes));
+peaks_freq = zeros(n_parciais, length(notes));
+
+% N_fft fixo — nao usa o comprimento total do segmento
+% 2^15 = 32768 pontos, resolucao suficiente para detetar harmonicos
+N_fft = 2^15;
 
 for i = 1:length(notes)
 
-    segment = x_notes{i}; % Carregar a nota processada
-    N_fft = length(segment); % Número de pontos para a FFT (igual ao comprimento do segmento)
+    segment = x_notes{i};
 
-    % Janela de Blackman-Harris — reduz o spectral leakage
-    window = blackman(N_fft); % Janela de Blackman
-    segment_windowed = segment .* window; % Aplicar a janela ao segmento
+    % Usa apenas os primeiros N_fft pontos do segmento
+    % O inicio da nota tem mais energia e e mais representativo
+    seg = segment(1:min(N_fft, length(segment)));
 
-    X = fft(segment_windowed, N_fft) / N_fft; % Calcular a FFT e normalizar pela quantidade de amostras
+    % Aplica janela de Blackman para reduzir spectral leakage
+    window = blackman(length(seg));
+    seg_windowed = seg .* window;
 
-    magnitude = 2 * abs(X(1:N_fft/2+1)); % Magnitude da FFT (apenas a metade positiva)
+    % Calcula a FFT e normaliza
+    X = fft(seg_windowed, N_fft) / N_fft;
 
-    freq_axis = linspace(0, fs/2, N_fft/2+1); % Eixo de frequências correspondente à FFT
+    % Extrai magnitude da metade positiva do espectro
+    magnitude = 2 * abs(X(1:N_fft/2+1));
 
-    % Deteção dos picos espectrais
-    % MinPeakDistance — distância mínima entre picos em bins - Evita que o mesmo pico seja detetado múltiplas vezes
+    % Eixo de frequencias em Hz
+    freq_axis = linspace(0, fs/2, N_fft/2+1);
 
+    % Detecao de picos
     min_dist = round(0.003 * fs);
-    [pks, locs] = findpeaks(magnitude, 'MinPeakDistance', min_dist, 'NPeaks', n_parciais, 'SortStr', 'descend');
+    [pks, locs] = findpeaks(magnitude, 'MinPeakDistance', min_dist);
 
-    % Guarda as magnitudes e frequências dos picos detetados
-    n_found = length(pks);
+    % Ordena por magnitude descendente e limita ao numero de parciais
+    [pks, sort_idx] = sort(pks, 'descend');
+    locs = locs(sort_idx);
+    n_found = min(n_parciais, length(pks));
+    pks  = pks(1:n_found);
+    locs = locs(1:n_found);
+
     peaks_mag(1:n_found, i)  = pks;
     peaks_freq(1:n_found, i) = freq_axis(locs);
 
-    % Gráfico do espectro de magnitude para cada nota
+    % Grafico
     figure('Visible', 'off');
     plot(freq_axis, magnitude, 'r');
     hold on;
     scatter(freq_axis(locs), pks, 'b', 'filled');
-    xlabel('Frequência [Hz]', 'FontSize', 10);
+    xlabel('Frequencia [Hz]', 'FontSize', 10);
     ylabel('Magnitude', 'FontSize', 10);
-    title(['Espectro FFT — ' notes{i}], 'FontSize', 11);
-    xlim([0 fs/2]);
+    title(['Espectro FFT - ' notes{i}], 'FontSize', 11);
+    xlim([0 5000]);
     figure_name = [figures_dir 'FFT_' notes{i} '.png'];
     print(figure_name, '-dpng', '-r150');
+    close all;
+
+    fprintf('FFT concluida: %s\n', notes{i});
 
 end
+
+
